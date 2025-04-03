@@ -12,25 +12,21 @@ os.chdir("..")
 from utils.vit_utils import VitUtilities
 
 class ViTClassifier(nn.Module):
-    def __init__(self, num_classes=1, dropout_rate=0.2, freeze_strategy="partial"): # droput 0.1-0.3?
+    def __init__(self, num_classes=1, dropout_rate=0.2, freeze_strategy="partial"): 
         super(ViTClassifier, self).__init__()
 
-        # Load Pretrained ViT-B/16 Model
         self.vit = timm.create_model("vit_base_patch16_224", pretrained=True)
 
-        # Freezing strategy
         if freeze_strategy == "full":
-            for param in self.vit.parameters():  # Freeze all
+            for param in self.vit.parameters():  
                 param.requires_grad = False
         elif freeze_strategy == "partial":
-            for block in self.vit.blocks[:-6]:  # Freeze first 6/12 blocks
+            for block in self.vit.blocks[:-6]: 
                 for param in block.parameters():
                     param.requires_grad = False
 
-        # Get number of features from ViT model
-        num_features = self.vit.embed_dim  # Correct way to extract feature size
+        num_features = self.vit.embed_dim 
 
-        # Replace classification head
         self.vit.head = nn.Sequential(
             nn.Dropout(dropout_rate),
             nn.LayerNorm(num_features),

@@ -24,7 +24,6 @@ class VitUtilities:
 
         return Image.fromarray(enhanced)
 
-
     @staticmethod
     def get_transforms(label):
         base_transforms = [
@@ -66,6 +65,7 @@ class VitUtilities:
             *base_transforms
         ])
 
+    # Fix and add some metrics
     @staticmethod
     def train_vit(model, train_loader, val_loader, optimizer, criterion, device, epochs):
         model.to(device)
@@ -125,6 +125,7 @@ class VitUtilities:
         print(f"Final Confusion Matrix:\n{cm}")
 
 
+    # For future evaluation 
     @staticmethod
     def compute_auc(model, dataloader, device):
         model.eval() 

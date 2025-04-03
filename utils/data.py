@@ -47,19 +47,18 @@ class DataProcessor:
     @staticmethod
     def split_data(train_dirs, val_dirs):
         """
-        Splits dataset into exactly 80% training and 20% validation data.
+        Splits dataset into 80% training and 20% validation data.
         """
         for category, train_dir in train_dirs.items():
             val_dir = val_dirs[category]
             os.makedirs(val_dir, exist_ok=True)
 
             files = [f for f in os.listdir(train_dir) if f.endswith(".png")]
-            random.shuffle(files)  # Shuffle files to ensure randomness
+            random.shuffle(files)  
 
-            split_idx = int(0.8 * len(files))  # 80% train, 20% validation
-            val_files = files[split_idx:]  # Last 20% go to validation
+            split_idx = int(0.8 * len(files))  
+            val_files = files[split_idx:]
 
-            # Move validation files
             for file_name in val_files:
                 shutil.move(os.path.join(train_dir, file_name), os.path.join(val_dir, file_name))
 
@@ -104,7 +103,8 @@ class DataProcessor:
 
         for dir, count in file_counts.items():
             percentage = (count / total_files) * 100 if total_files > 0 else 0
-            print(f"{dir}: {count} files ({percentage:.2f}%)")
+            dir_name = os.path.basename(dir) 
+            print(f"{dir_name}: {count} files ({percentage:.2f}%)")
 
         print(f"\nTotal files: {total_files}")
 
