@@ -8,6 +8,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_auc_score
 import seaborn as sns
+from PIL import Image
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
 
 from PIL import Image
 
@@ -27,7 +30,7 @@ class VitUtilities:
         base_transforms = [
             transforms.Grayscale(num_output_channels=1), 
             transforms.ToTensor(),
-            transforms.Lambda(lambda x: x.repeat(3, 1, 1)),  # Repeat to 3 channels
+            transforms.Lambda(lambda x: x.repeat(3, 1, 1)), 
             transforms.Normalize([0.5]*3, [0.5]*3),
             transforms.Resize(256),
             transforms.CenterCrop(224)
@@ -71,7 +74,6 @@ class VitUtilities:
         all_labels = []
 
         for epoch in range(epochs):
-                # Training
                 model.train()
                 train_loss = 0.0
                 progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs} [Train]')
@@ -84,7 +86,6 @@ class VitUtilities:
                     loss = criterion(outputs, labels)
                     loss.backward()
                     
-                    # Gradient clipping for stability
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     
                     optimizer.step()
@@ -124,9 +125,9 @@ class VitUtilities:
         print(f"Final Confusion Matrix:\n{cm}")
 
 
-
+    @staticmethod
     def compute_auc(model, dataloader, device):
-        model.eval()  # Set model to evaluation mode
+        model.eval() 
         all_labels = []
         all_preds = []
 
@@ -134,93 +135,101 @@ class VitUtilities:
             for images, labels in dataloader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
-                probs = torch.softmax(outputs, dim=1)  # Convert logits to probabilities
+                probs = torch.softmax(outputs, dim=1)  
                 
                 all_labels.extend(labels.cpu().numpy())  
-                all_preds.extend(probs.cpu().numpy())  # Store probabilities
+                all_preds.extend(probs.cpu().numpy())  
 
-        # Convert lists to numpy arrays
         all_labels = np.array(all_labels)
         all_preds = np.array(all_preds)
 
-        # Compute AUC for each class
         auc_scores = {}
         for i, class_name in enumerate(["Pneumonia", "Unsure", "Normal"]):
             auc_scores[class_name] = roc_auc_score((all_labels == i).astype(int), all_preds[:, i])
 
         return auc_scores
 
-
-
-    @staticmethod
-    def prediction_transforms():
-        return transforms.Compose([
-            transforms.Resize((224, 224)),  # Ensure same input size as training
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Same normalization as training
-        ])
-
     @staticmethod
     def predict_vit(model, image_path, device):
+        transform = transforms.Compose([
+                transforms.Grayscale(num_output_channels=1), 
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.repeat(3, 1, 1)), 
+                transforms.Normalize([0.5]*3, [0.5]*3),
+                transforms.Resize(256),
+                transforms.CenterCrop(224)
+            ])
+
+        image = Image.open(image_path).convert("L")
+        image = VitUtilities.apply_clahe(image)
+        image_tensor = transform(image).unsqueeze(0).to(device) 
+
         model.eval()
-        image = Image.open(image_path).convert("RGB")
-        transform = VitUtilities.prediction_transforms()  # Apply normal class transforms for inference
-        image_tensor = transform(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            output = model(image_tensor)
-            prediction = torch.argmax(output, dim=1).item()
+            output = model(image_tensor).squeeze()
+            probability = torch.sigmoid(output).item()  
 
-        class_labels = {0: "Pneumonia", 1: "Unsure", 2: "Normal"}
-        return class_labels[prediction]
-    
-    
+        predicted_class = "Pneumonia" if probability < 0.5 else "Normal"
+        probability = 1 - probability if probability < 0.5 else probability
+
+        return predicted_class, probability
+
+    @staticmethod
+    def reshape_transform(tensor, height=14, width=14):
+        result = tensor[:, 1:, :].reshape(tensor.size(0), 
+                                    height, width, tensor.size(2))
+        result = result.transpose(2, 3).transpose(1, 2)
+        return result
 
     @staticmethod
     def visualize_gradcam(model, image_path, device):
         model.eval()
         
-        # Load and transform image
-        image = Image.open(image_path).convert("RGB")
-        transform = VitUtilities.prediction_transforms()
-        image_tensor = transform(image).unsqueeze(0).to(device)
-        image_tensor.requires_grad_(True)
-        
-        # Initialize CAM extractor
-        cam_extractor = SmoothGradCAMpp(model)
-        
-        # Forward pass
-        output = model(image_tensor)
-        predicted_class = output.squeeze(0).argmax().item()
-        
-        # Generate activation map
-        activation_map = cam_extractor(predicted_class, output)
-        
-        # Convert activation map to PIL Image
-        mask = activation_map[0].squeeze().cpu().numpy()  # Convert to numpy array
-        mask = Image.fromarray((mask * 255).astype('uint8'))  # Convert to PIL Image
-        
-        # Resize mask to match original image size
-        mask = mask.resize(image.size, Image.BILINEAR)
-        
-        # Visualization
-        result = overlay_mask(image, mask, alpha=0.5)
+        transform = transforms.Compose([
+            transforms.Grayscale(num_output_channels=1), 
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x.repeat(3, 1, 1)),  
+            transforms.Normalize([0.5]*3, [0.5]*3),
+            transforms.Resize(224),
+            transforms.CenterCrop(224)
+        ])
 
-        plt.figure(figsize=(10,5))
-        plt.subplot(1,2,1)
-        plt.imshow(image)
+        original_image = Image.open(image_path).convert("RGB")
+        
+        image = Image.open(image_path).convert("L")
+        image = VitUtilities.apply_clahe(image)
+        image_tensor = transform(image).unsqueeze(0).to(device)
+        
+        target_layer = model.vit.blocks[-1].norm1
+        
+        cam = GradCAM(model=model,
+                    target_layers=[target_layer],
+                    reshape_transform=VitUtilities.reshape_transform)
+        
+        grayscale_cam = cam(input_tensor=image_tensor, targets=None)
+        grayscale_cam = grayscale_cam[0, :]
+        
+        input_image = image_tensor.squeeze().cpu().detach().numpy()
+        input_image = np.transpose(input_image, (1, 2, 0))
+        input_image = (input_image * 0.5 + 0.5)  
+        
+        visualization = show_cam_on_image(input_image, grayscale_cam, use_rgb=True)
+        inference = VitUtilities.predict_vit(model, image_path, device)
+        inference[1]
+        
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(original_image)
         plt.title("Original Image")
         plt.axis("off")
 
-        plt.subplot(1,2,2)
-        plt.imshow(result)
-        plt.title(f"Grad-CAM Visualization (Class: {predicted_class})")
+        plt.subplot(1, 2, 2)
+        plt.imshow(visualization)
+        plt.title(f"Grad-CAM Visualization - {inference[0]} {round(inference[1] * 100, 2)}%")
         plt.axis("off")
 
         plt.show()
-        
-        image_tensor.detach_()
-
 
 
 
