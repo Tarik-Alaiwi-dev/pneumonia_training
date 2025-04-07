@@ -3,7 +3,7 @@
 
 ## Project Overview
 
-This project involves the development of a deep learning model for medical image analysis, leveraging recent research advances in self-supervised learning, hybrid architectures, and explainable AI (XAI).
+This project involves developing a deep learning model for X-Ray-based lung disease classification, leveraging recent research advances in Vision Transformers, self-supervised learning, pipeline architectures, and explainable AI (XAI).
 
 <img src="visualisation.png" alt="Model Visualization" width="800" height="450" style="display: block; margin: 0 auto;"> 
 
