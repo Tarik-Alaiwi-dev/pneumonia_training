@@ -1,4 +1,4 @@
-# ViT Pneumonia Classifier
+# ViT Pneumonia Classifier | [DEMO](https://huggingface.co/spaces/TarikKarol/pneumonia_vit_classifier?logs=build)
 
 
 ## Project Overview
@@ -46,3 +46,4 @@ This project involves developing a deep learning model for X-Ray-based lung dise
 [Radiological Society of North America (RSNA), 2018. *RSNA Pneumonia Detection Challenge.* (Dataset), Kaggle](https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/data)
 
 > **Future work**: Creating a full-stack system for this model, Implementing more metrics, Longer training, Creating a pipeline with U-Net for lung segmentation.
+
