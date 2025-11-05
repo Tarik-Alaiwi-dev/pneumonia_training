@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.metrics import confusion_matrix, roc_auc_score, precision_score, recall_score, f1_score
 import seaborn as sns
 from PIL import Image
 from pytorch_grad_cam import GradCAM
@@ -70,58 +70,86 @@ class VitUtilities:
     def train_vit(model, train_loader, val_loader, optimizer, criterion, device, epochs):
         model.to(device)
 
-        all_preds = []
-        all_labels = []
-
         for epoch in range(epochs):
-                model.train()
-                train_loss = 0.0
-                progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs} [Train]')
-                
-                for images, labels in progress_bar:
-                    images, labels = images.to(device), labels.to(device)
-                    
-                    optimizer.zero_grad()
-                    outputs = model(images).squeeze()
-                    loss = criterion(outputs, labels)
-                    loss.backward()
-                    
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    
-                    optimizer.step()
-                    train_loss += loss.item()
-                    
-                    progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
+            # ---- TRAINING ----
+            model.train()
+            train_loss = 0.0
+            progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs} [Train]')
 
-        model.eval()
-        with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in progress_bar:
                 images, labels = images.to(device), labels.to(device)
-                outputs = model(images).squeeze()
-                preds = (torch.sigmoid(outputs) > 0.5).cpu().numpy()
-                
-                all_preds.extend(preds)
-                all_labels.extend(labels.cpu().numpy())
 
-        cm = confusion_matrix(all_labels, all_preds)
-        
+                optimizer.zero_grad()
+                outputs = model(images).squeeze(dim=1)
+                labels = labels.float().view(-1)
+                loss = criterion(outputs, labels)
+                loss.backward()
+
+
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                train_loss += loss.item()
+
+                progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
+
+            # ---- VALIDATION ----
+            model.eval()
+            all_preds = []
+            all_labels = []
+            all_probs = []
+
+            with torch.no_grad():
+                for images, labels in val_loader:
+                    images, labels = images.to(device), labels.to(device)
+                    outputs = model(images).squeeze()
+
+                    probs = torch.sigmoid(outputs).cpu().numpy()
+                    preds = (probs > 0.5).astype(int)
+
+                    all_probs.extend(probs)
+                    all_preds.extend(preds)
+                    all_labels.extend(labels.cpu().numpy())
+
+            # ---- METRICS ----
+            precision = precision_score(all_labels, all_preds)
+            recall = recall_score(all_labels, all_preds)
+            f1 = f1_score(all_labels, all_preds)
+            try:
+                auc = roc_auc_score(all_labels, all_probs)
+            except ValueError:
+                auc = float('nan')  # np. jeśli same 0 lub 1 w all_labels
+
+            cm = confusion_matrix(all_labels, all_preds)
+            tn, fp, fn, tp = cm.ravel()
+            sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+            specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+            accuracy = (tp + tn) / (tp + tn + fp + fn)
+
+            # ---- LOGGING ----
+            print(f"\nEpoch {epoch+1}/{epochs} Results:")
+            print(f"  Train Loss: {train_loss/len(train_loader):.4f}")
+            print(f"  Val Accuracy: {accuracy:.4f}")
+            print(f"  Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f} | AUC: {auc:.4f}")
+            print(f"  Sensitivity: {sensitivity:.4f} | Specificity: {specificity:.4f}")
+
+        # ---- FINAL CONFUSION MATRIX ----
         plt.figure(figsize=(8,6))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=['Normal', 'Pneumonia'],
-                yticklabels=['Normal', 'Pneumonia'])
+                    xticklabels=['Normal', 'Pneumonia'],
+                    yticklabels=['Normal', 'Pneumonia'])
         plt.title('Confusion Matrix (Threshold=0.5)')
         plt.ylabel('True Label')
         plt.xlabel('Predicted Label')
-        
-        tn, fp, fn, tp = cm.ravel()
+
         plt.text(0.5, -0.2, 
-                f'Sensitivity: {tp/(tp+fn):.2%} | Specificity: {tn/(tn+fp):.2%}\nAccuracy: {(tp+tn)/(tp+tn+fp+fn):.2%}',
-                ha='center', va='center', transform=plt.gca().transAxes)
-        
+                 f'Sensitivity: {sensitivity:.2%} | Specificity: {specificity:.2%}\n'
+                 f'Accuracy: {accuracy:.2%} | F1: {f1:.2%} | AUC: {auc:.2%}',
+                 ha='center', va='center', transform=plt.gca().transAxes)
+
         plt.savefig('confusion_matrix.png', bbox_inches='tight')
         plt.close()
-        
-        print("Training Complete!")
+
+        print("\n✅ Training Complete!")
         print(f"Final Confusion Matrix:\n{cm}")
 
 
